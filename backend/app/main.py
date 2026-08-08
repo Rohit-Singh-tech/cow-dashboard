@@ -42,7 +42,7 @@ app.add_middleware(
 app.include_router(ml_router)
 app.include_router(datalogger_router)
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {
         "service": "Cow Health Monitoring System ML Backend API",

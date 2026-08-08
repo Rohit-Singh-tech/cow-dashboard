@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getOverviewSummary, getDevices } from '../api';
 
-const Sidebar = ({ viewMode, setViewMode, activeDeviceCount = 0, packetCount = 0, activeDevice = null, setActiveDevice }) => {
+const Sidebar = ({ viewMode, setViewMode, activeDeviceCount = 0, packetCount = 0, activeDevice = null, setActiveDevice, connectedDevices = [] }) => {
   const [alerts, setAlerts] = useState(0);
 
   useEffect(() => {
@@ -19,27 +19,6 @@ const Sidebar = ({ viewMode, setViewMode, activeDeviceCount = 0, packetCount = 0
     fetchSummary();
     const interval = setInterval(fetchSummary, 5000);
     return () => clearInterval(interval);
-  }, []);
-
-  const [connectedDevices, setConnectedDevices] = useState([]);
-
-  useEffect(() => {
-    const fetchDevices = async () => {
-      try {
-        const devs = await getDevices();
-        if (devs && Array.isArray(devs)) {
-          setConnectedDevices(devs);
-          if (!activeDevice && devs.length > 0 && setActiveDevice) {
-            setActiveDevice(devs[0].id);
-          }
-        }
-      } catch (err) {
-        console.error("Sidebar devices fetch error:", err);
-      }
-    };
-    fetchDevices();
-    const devInterval = setInterval(fetchDevices, 15000);
-    return () => clearInterval(devInterval);
   }, []);
 
   const navItems = [

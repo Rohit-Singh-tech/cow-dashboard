@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import HeaderBar from './components/HeaderBar';
 
@@ -12,12 +12,36 @@ import BLERawData from './pages/BLERawData';
 import CompareView from './pages/CompareView';
 import MLModelCenter from './pages/MLModelCenter';
 import Settings from './pages/Settings';
+import { getDevices, getOverviewSummary } from './api';
 
 import './App.css';
 
 export default function App() {
   const [viewMode, setViewMode] = useState('dashboard');
   const [activeDevice, setActiveDevice] = useState(null);
+  const [connectedDevices, setConnectedDevices] = useState([]);
+  const [totalPackets, setTotalPackets] = useState(0);
+
+  useEffect(() => {
+    const fetchAppGlobals = async () => {
+      try {
+        const devs = await getDevices();
+        if (devs && Array.isArray(devs)) {
+          setConnectedDevices(devs);
+          if (!activeDevice && devs.length > 0) {
+            setActiveDevice(devs[0].id);
+          }
+        }
+        const sumData = await getOverviewSummary();
+        if (sumData) {
+          setTotalPackets(sumData.packets_today || 0);
+        }
+      } catch (err) {}
+    };
+    fetchAppGlobals();
+    const interval = setInterval(fetchAppGlobals, 15000);
+    return () => clearInterval(interval);
+  }, [activeDevice]);
 
   const getPageTitle = () => {
     switch (viewMode) {
@@ -37,13 +61,14 @@ export default function App() {
 
   return (
     <div className="dashboard-container">
-      <Sidebar viewMode={viewMode} setViewMode={setViewMode} activeDevice={activeDevice} setActiveDevice={setActiveDevice} />
+      <Sidebar viewMode={viewMode} setViewMode={setViewMode} activeDevice={activeDevice} setActiveDevice={setActiveDevice} packetCount={totalPackets} connectedDevices={connectedDevices} />
       
       <div className="main-layout">
         <HeaderBar
           title={getPageTitle()}
           activeDevice={activeDevice}
           setActiveDevice={viewMode === 'dashboard' ? setActiveDevice : null}
+          devices={connectedDevices.map(d => d.id)}
         />
         
         <div className="content-body">

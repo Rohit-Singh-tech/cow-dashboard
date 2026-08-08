@@ -291,6 +291,11 @@ ml_pipeline = CowHealthMLPipeline()
 def get_or_create_model():
     """Load existing pickled model from disk or train a new baseline model if not present."""
     global ml_pipeline
+    
+    # Cache check: if it's already loaded into memory, don't load from disk again!
+    if getattr(ml_pipeline, 'is_trained', False):
+        return ml_pipeline
+
     model_dir = os.path.dirname(MODEL_FILE_PATH)
     if not os.path.exists(model_dir):
         os.makedirs(model_dir, exist_ok=True)

@@ -117,12 +117,26 @@ def predict_device_health(
         }
 
     packet_predictions = []
-    for h in headers:
+    live_telemetry = []
+
+    for idx, h in enumerate(headers):
         if h.points and len(h.points) > 0:
             sorted_pts = sorted(h.points, key=lambda p: p.point_index)
             x_seq = [p.x if p.x is not None else 0 for p in sorted_pts]
             y_seq = [p.y if p.y is not None else 0 for p in sorted_pts]
             z_seq = [p.z if p.z is not None else 0 for p in sorted_pts]
+
+            if idx == 0:
+                import math
+                for i in range(len(x_seq)):
+                    mag = math.sqrt(x_seq[i]**2 + y_seq[i]**2 + z_seq[i]**2)
+                    live_telemetry.append({
+                        "sample": i,
+                        "AccX": x_seq[i],
+                        "AccY": y_seq[i],
+                        "AccZ": z_seq[i],
+                        "Magnitude": round(mag, 2)
+                    })
 
             res = model.predict_single(x_seq, y_seq, z_seq)
             res["header_id"] = h.id
@@ -143,7 +157,8 @@ def predict_device_health(
         },
         "packets_evaluated": len(packet_predictions),
         "health_analysis": health_analysis,
-        "recent_predictions": packet_predictions[:20]
+        "recent_predictions": packet_predictions[:20],
+        "live_telemetry": live_telemetry
     }
 
 

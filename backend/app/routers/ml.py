@@ -301,7 +301,7 @@ def get_analytics_overview_summary(db: Session = Depends(get_db)):
     model = get_or_create_model()
 
     for dev in devices:
-        recent = db.query(DataLoggerHeader).options(joinedload(DataLoggerHeader.points)).filter(DataLoggerHeader.device_id == str(dev)).order_by(DataLoggerHeader.timestamp.desc()).limit(20).all()
+        recent = db.query(DataLoggerHeader).options(joinedload(DataLoggerHeader.points)).filter(DataLoggerHeader.device_id == str(dev)).order_by(DataLoggerHeader.timestamp.desc()).limit(3).all()
         preds = []
         for h in recent:
             if h.points and len(h.points) > 0:
@@ -343,7 +343,7 @@ def get_analytics_overview_summary(db: Session = Depends(get_db)):
 @router.get("/analytics/cluster-map")
 def get_behavior_cluster_map(db: Session = Depends(get_db)):
     """Return 2D latent space scatter plot coordinates for HDBSCAN / t-SNE cluster visualization."""
-    headers = db.query(DataLoggerHeader).options(joinedload(DataLoggerHeader.points)).order_by(DataLoggerHeader.timestamp.desc()).limit(60).all()
+    headers = db.query(DataLoggerHeader).options(joinedload(DataLoggerHeader.points)).order_by(DataLoggerHeader.timestamp.desc()).limit(20).all()
     model = get_or_create_model()
 
     cluster_points = []

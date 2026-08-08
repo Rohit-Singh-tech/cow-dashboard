@@ -12,8 +12,7 @@ async def lifespan(app: FastAPI):
     # Startup actions: Seed DB tables & load baseline ML model
     print("[Cow Health AI Backend] Initializing Database & ML Model Engine...")
     try:
-        # seed_demo_db_if_empty()
-        pass
+        seed_demo_db_if_empty()
     except Exception as db_err:
         print(f"[Warning] DB Seed Notice: {db_err}")
 

@@ -29,6 +29,9 @@ const Sidebar = ({ viewMode, setViewMode, activeDeviceCount = 0, packetCount = 0
         const devs = await getDevices();
         if (devs && Array.isArray(devs)) {
           setConnectedDevices(devs);
+          if (!activeDevice && devs.length > 0 && setActiveDevice) {
+            setActiveDevice(devs[0].id);
+          }
         }
       } catch (err) {
         console.error("Sidebar devices fetch error:", err);

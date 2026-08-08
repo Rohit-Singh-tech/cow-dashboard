@@ -25,31 +25,24 @@ async def ml_prediction_worker():
             await asyncio.sleep(10)
 
 @asynccontextmanager
-async def run_startup_initialization():
-    """Run DB seeding and ML model loading in the background to avoid blocking port binding."""
-    print("[Cow Health AI Backend] Background Initialization Started...")
-    
-    # Run DB seed in a separate thread since it's synchronous and heavy
+async def lifespan(app: FastAPI):
+    # Startup actions: Seed DB tables & load baseline ML model
+    print("[Cow Health AI Backend] Initializing Database & ML Model Engine...")
     try:
-        await asyncio.to_thread(seed_demo_db_if_empty)
+        seed_demo_db_if_empty()
     except Exception as db_err:
         print(f"[Warning] DB Seed Notice: {db_err}")
-  # Run ML Model init in a separate thread
+
     try:
-         await asyncio.to_thread(get_or_create_model)
+        get_or_create_model()
     except Exception as e:
         print(f"[Warning] ML Initialization Notice: {e}")
-        print("[Cow Health AI Backend] Background Initialization Completed.")
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Start background initialization immediately so Uvicorn can bind the port
-    init_task = asyncio.create_task(run_startup_initialization())  
+        
     # Start background prediction worker
     worker_task = asyncio.create_task(ml_prediction_worker())
     
     yield
     print("[Cow Health AI Backend] Shutting down server.")
-    init_task.cancel()
     worker_task.cancel()
 
 app = FastAPI(

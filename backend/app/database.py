@@ -43,6 +43,16 @@ def seed_demo_db_if_empty():
     from app.models.registry import TagRegistry
 
     Base.metadata.create_all(bind=engine)
+    
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE datalogger_headers ADD COLUMN predicted_behavior VARCHAR;"))
+            conn.execute(text("ALTER TABLE datalogger_headers ADD COLUMN confidence FLOAT;"))
+            conn.execute(text("ALTER TABLE datalogger_headers ADD COLUMN anomaly_score FLOAT;"))
+            conn.execute(text("ALTER TABLE datalogger_headers ADD COLUMN is_anomaly BOOLEAN;"))
+    except Exception as e:
+        pass # Columns likely already exist
 
     db = SessionLocal()
     try:

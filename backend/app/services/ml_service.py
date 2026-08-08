@@ -127,59 +127,6 @@ def generate_synthetic_dataset(samples_per_label=150):
     return np.array(X_list), np.array(y_list)
 
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class SelfAttention1D(nn.Module):
-    def __init__(self, hidden_dim):
-        super().__init__()
-        self.projection = nn.Linear(hidden_dim, hidden_dim)
-        self.query = nn.Linear(hidden_dim, 1, bias=False)
-
-    def forward(self, x):
-        # x shape: (batch_size, seq_len, hidden_dim)
-        keys = torch.tanh(self.projection(x))
-        weights = F.softmax(self.query(keys), dim=1)
-        context = torch.sum(x * weights, dim=1)
-        return context, weights
-
-class CNN1D_BiLSTM_Attention(nn.Module):
-    def __init__(self, in_channels=3, num_classes=9, lstm_hidden=64):
-        super().__init__()
-        # 1. 1D CNN Local Feature Extractor
-        self.conv1 = nn.Conv1d(in_channels=in_channels, out_channels=32, kernel_size=5, padding=2)
-        self.bn1 = nn.BatchNorm1d(32)
-        self.conv2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.3)
-
-        # 2. BiLSTM Temporal Sequence Model
-        self.bilstm = nn.LSTM(input_size=64, hidden_size=lstm_hidden, num_layers=2, batch_first=True, bidirectional=True)
-
-        # 3. Attention Mechanism
-        self.attention = SelfAttention1D(hidden_dim=lstm_hidden * 2)
-
-        # 4. Dense Softmax Classifier
-        self.fc1 = nn.Linear(lstm_hidden * 2, 64)
-        self.fc2 = nn.Linear(64, num_classes)
-
-    def forward(self, x):
-        # x input shape: (batch_size, seq_len=80, channels=3)
-        x = x.transpose(1, 2) # (batch_size, channels=3, seq_len=80)
-        x = self.relu(self.bn1(self.conv1(x)))
-        x = self.relu(self.bn2(self.conv2(x)))
-        
-        x = x.transpose(1, 2) # (batch_size, seq_len=80, 64)
-        lstm_out, _ = self.bilstm(x)
-        context, attn_weights = self.attention(lstm_out)
-
-        out = self.dropout(self.relu(self.fc1(context)))
-        logits = self.fc2(out)
-        return logits, attn_weights
-
-
 class CowHealthMLPipeline:
     def __init__(self):
         self.scaler = StandardScaler()
@@ -187,60 +134,32 @@ class CowHealthMLPipeline:
             "Standing", "Walking", "Running", "Grazing",
             "Resting", "Lying", "Drinking", "Ruminating", "Heat Stress Risk"
         ])
-        self.dl_model = CNN1D_BiLSTM_Attention(in_channels=3, num_classes=len(self.classes_))
+        self.classifier = RandomForestClassifier(n_estimators=50, max_depth=10, random_state=42)
         self.anomaly_detector = IsolationForest(contamination=0.04, random_state=42)
         self.is_trained = False
         self.training_info = {}
 
     def train(self, X, y, epochs=5, batch_size=512, lr=0.01):
-        # 1. Scale tabular summary features for IsolationForest
+        # 1. Scale tabular summary features
         X_scaled = self.scaler.fit_transform(X)
+        
+        # 2. Train Anomaly Detector
         self.anomaly_detector.fit(X_scaled)
 
-        # 2. Vectorized extraction of (N, 80, 3) XYZ tensor sequences for PyTorch Deep Learning
-        x_seqs = X[:, 31:111]
-        y_seqs = X[:, 111:191]
-        z_seqs = X[:, 191:271]
-        raw_sequences = np.stack([x_seqs, y_seqs, z_seqs], axis=-1) # (N, 80, 3)
-
-        X_tensors = torch.tensor(raw_sequences, dtype=torch.float32)
+        # 3. Train Random Forest Classifier
+        self.classifier.fit(X_scaled, y)
         
-        # Map label strings to indices
-        label_to_idx = {c: i for i, c in enumerate(self.classes_)}
-        y_indices = np.array([label_to_idx.get(str(lbl), 0) for lbl in y])
-        y_tensors = torch.tensor(y_indices, dtype=torch.long)
-
-        # PyTorch Training Loop
-        dataset = torch.utils.data.TensorDataset(X_tensors, y_tensors)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-        optimizer = torch.optim.Adam(self.dl_model.parameters(), lr=lr)
-        criterion = nn.CrossEntropyLoss()
-
-        self.dl_model.train()
-        for epoch in range(epochs):
-            for batch_x, batch_y in loader:
-                optimizer.zero_grad()
-                logits, _ = self.dl_model(batch_x)
-                loss = criterion(logits, batch_y)
-                loss.backward()
-                optimizer.step()
-
         # Evaluate Accuracy
-        self.dl_model.eval()
-        with torch.no_grad():
-            logits_all, _ = self.dl_model(X_tensors)
-            preds_all = torch.argmax(logits_all, dim=1).numpy()
-            acc = float(accuracy_score(y_indices, preds_all))
+        preds_all = self.classifier.predict(X_scaled)
+        acc = float(accuracy_score(y, preds_all))
 
         self.is_trained = True
         self.training_info = {
             "trained_at": datetime.now(timezone.utc).isoformat(),
-            "architecture": "1D CNN + BiLSTM + Attention Neural Network",
+            "architecture": "Random Forest Classifier (Scikit-Learn)",
             "accuracy": round(acc, 4),
             "sample_count": len(y),
-            "classes": self.classes_.tolist(),
-            "epochs": epochs
+            "classes": self.classifier.classes_.tolist()
         }
         return self.training_info
 
@@ -248,27 +167,17 @@ class CowHealthMLPipeline:
         if not self.is_trained:
             raise RuntimeError("ML Model is not trained yet.")
 
-        # Prepare 80-sample 3-axis tensor
-        x_arr = np.array(x_seq, dtype=float)[:80]
-        y_arr = np.array(y_seq, dtype=float)[:80]
-        z_arr = np.array(z_seq, dtype=float)[:80]
-
-        seq_matrix = np.column_stack([x_arr, y_arr, z_arr])
-        tensor_in = torch.tensor(seq_matrix, dtype=torch.float32).unsqueeze(0) # (1, 80, 3)
-
-        # PyTorch Deep Learning forward pass
-        self.dl_model.eval()
-        with torch.no_grad():
-            logits, attn_weights = self.dl_model(tensor_in)
-            probs = F.softmax(logits, dim=1)[0].numpy()
-
-        max_idx = int(np.argmax(probs))
-        confidence = float(round(float(probs[max_idx]), 2))
-        predicted_behavior = str(self.classes_[max_idx])
-
-        # Anomaly score via IsolationForest
+        # Extract features and scale
         feat = extract_window_features(x_seq, y_seq, z_seq).reshape(1, -1)
         feat_scaled = self.scaler.transform(feat)
+
+        # Classify
+        probs = self.classifier.predict_proba(feat_scaled)[0]
+        max_idx = int(np.argmax(probs))
+        confidence = float(round(float(probs[max_idx]), 2))
+        predicted_behavior = str(self.classifier.classes_[max_idx])
+
+        # Anomaly score via IsolationForest
         raw_anomaly_score = self.anomaly_detector.score_samples(feat_scaled)[0]
         anomaly_score = float(np.clip(round(float((0.2 - raw_anomaly_score) / 0.8), 2), 0.0, 1.0))
         is_anomaly = bool(self.anomaly_detector.predict(feat_scaled)[0] == -1)
@@ -281,7 +190,7 @@ class CowHealthMLPipeline:
             "confidence": confidence,
             "anomaly_score": anomaly_score,
             "is_anomaly": is_anomaly,
-            "attention_weights": attn_weights.squeeze().numpy().tolist()
+            "attention_weights": [0.0] * 80
         }
 
 
@@ -505,3 +414,43 @@ def get_feature_radar_metrics(x_seq, y_seq, z_seq, is_anomaly=False):
             {"subject": "Variance", "value": 20.0, "fullMark": 100}
         ]
     }
+
+
+def process_unpredicted_headers(db):
+    """Scan database for DataLoggerHeaders without a predicted_behavior and process them."""
+    from app.models.datalogger import DataLoggerHeader
+    from sqlalchemy.orm import joinedload
+    
+    # Only pull up to 100 at a time to prevent memory spikes
+    unprocessed = db.query(DataLoggerHeader).options(joinedload(DataLoggerHeader.points)).filter(
+        DataLoggerHeader.predicted_behavior == None
+    ).limit(100).all()
+    
+    if not unprocessed:
+        return 0
+        
+    model = get_or_create_model()
+    processed_count = 0
+    
+    for h in unprocessed:
+        if h.points and len(h.points) > 0:
+            sorted_pts = sorted(h.points, key=lambda p: p.point_index)
+            x_seq = [p.x if p.x is not None else 0 for p in sorted_pts]
+            y_seq = [p.y if p.y is not None else 0 for p in sorted_pts]
+            z_seq = [p.z if p.z is not None else 0 for p in sorted_pts]
+            
+            res = model.predict_single(x_seq, y_seq, z_seq)
+            h.predicted_behavior = res["predicted_behavior"]
+            h.confidence = res["confidence"]
+            h.anomaly_score = res["anomaly_score"]
+            h.is_anomaly = res["is_anomaly"]
+            processed_count += 1
+        else:
+            # If no points, label it unknown so we don't infinitely retry
+            h.predicted_behavior = "Unknown"
+            h.confidence = 0.0
+            h.anomaly_score = 0.0
+            h.is_anomaly = False
+            
+    db.commit()
+    return processed_count

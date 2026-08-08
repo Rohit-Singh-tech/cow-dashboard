@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey, Float, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -28,6 +28,12 @@ class DataLoggerHeader(Base):
     raw_data = Column(Text, nullable=True)
     timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), default=func.now())
+    
+    # ML Prediction Columns (Cached Results)
+    predicted_behavior = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
+    anomaly_score = Column(Float, nullable=True)
+    is_anomaly = Column(Boolean, nullable=True, default=False)
 
     raw_packet = relationship("RawPacket", back_populates="header")
     points = relationship("DataLoggerPoint", back_populates="header", cascade="all, delete-orphan")

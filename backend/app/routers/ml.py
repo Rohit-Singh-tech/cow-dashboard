@@ -138,7 +138,16 @@ def predict_device_health(
                         "Magnitude": round(mag, 2)
                     })
 
-            res = model.predict_single(x_seq, y_seq, z_seq)
+            if getattr(h, 'predicted_behavior', None):
+                res = {
+                    "predicted_behavior": h.predicted_behavior,
+                    "confidence": h.confidence,
+                    "anomaly_score": h.anomaly_score,
+                    "is_anomaly": h.is_anomaly,
+                    "attention_weights": [0.0] * 80
+                }
+            else:
+                res = model.predict_single(x_seq, y_seq, z_seq)
             res["header_id"] = h.id
             res["packet_id_num"] = h.packet_id_num
             res["timestamp"] = h.timestamp.isoformat() if h.timestamp else None
@@ -316,17 +325,20 @@ def get_analytics_overview_summary(db: Session = Depends(get_db)):
     model = get_or_create_model()
 
     for dev in devices:
-        recent = db.query(DataLoggerHeader).options(joinedload(DataLoggerHeader.points)).filter(DataLoggerHeader.device_id == str(dev)).order_by(DataLoggerHeader.timestamp.desc()).limit(3).all()
+        recent = db.query(DataLoggerHeader).filter(DataLoggerHeader.device_id == str(dev)).order_by(DataLoggerHeader.timestamp.desc()).limit(3).all()
         preds = []
         for h in recent:
-            if h.points and len(h.points) > 0:
-                sorted_pts = sorted(h.points, key=lambda p: p.point_index)
-                x_seq = [p.x or 0 for p in sorted_pts]
-                y_seq = [p.y or 0 for p in sorted_pts]
-                z_seq = [p.z or 0 for p in sorted_pts]
-                p_res = model.predict_single(x_seq, y_seq, z_seq)
-                preds.append(p_res)
-                total_anomaly_score += p_res.get("anomaly_score", 0.0)
+            if getattr(h, 'predicted_behavior', None):
+                p_res = {
+                    "predicted_behavior": h.predicted_behavior,
+                    "confidence": h.confidence,
+                    "anomaly_score": h.anomaly_score,
+                    "is_anomaly": h.is_anomaly
+                }
+            else:
+                p_res = {"predicted_behavior": "Unknown", "anomaly_score": 0.0}
+            preds.append(p_res)
+            total_anomaly_score += p_res.get("anomaly_score", 0.0)
 
         health = infer_secondary_health_status(preds, dev)
         st = health["health_status"]
@@ -358,41 +370,36 @@ def get_analytics_overview_summary(db: Session = Depends(get_db)):
 @router.get("/analytics/cluster-map")
 def get_behavior_cluster_map(db: Session = Depends(get_db)):
     """Return 2D latent space scatter plot coordinates for HDBSCAN / t-SNE cluster visualization."""
-    headers = db.query(DataLoggerHeader).options(joinedload(DataLoggerHeader.points)).order_by(DataLoggerHeader.timestamp.desc()).limit(20).all()
-    model = get_or_create_model()
+    headers = db.query(DataLoggerHeader).order_by(DataLoggerHeader.timestamp.desc()).limit(20).all()
 
     cluster_points = []
     for idx, h in enumerate(headers):
-        if h.points and len(h.points) > 0:
-            sorted_pts = sorted(h.points, key=lambda p: p.point_index)
-            x_seq = [p.x or 0 for p in sorted_pts]
-            y_seq = [p.y or 0 for p in sorted_pts]
-            z_seq = [p.z or 0 for p in sorted_pts]
-            res = model.predict_single(x_seq, y_seq, z_seq)
+        lbl = getattr(h, 'predicted_behavior', 'Unknown') or 'Unknown'
+        confidence = getattr(h, 'confidence', 0.0) or 0.0
+        is_anomaly = getattr(h, 'is_anomaly', False) or False
+        
+        if lbl == "Grazing":
+            cx, cy = -2.5 + (idx % 5) * 0.3, 1.8 + (idx % 4) * 0.25
+        elif lbl == "Walking":
+            cx, cy = 1.2 + (idx % 4) * 0.4, 3.1 + (idx % 5) * 0.3
+        elif lbl == "Resting":
+            cx, cy = -1.8 + (idx % 6) * 0.25, -2.4 + (idx % 4) * 0.3
+        elif lbl == "Standing":
+            cx, cy = 2.4 + (idx % 5) * 0.3, -1.2 + (idx % 4) * 0.25
+        elif lbl == "Lying":
+            cx, cy = -3.2 + (idx % 4) * 0.3, -1.1 + (idx % 5) * 0.2
+        else:
+            cx, cy = 0.2 + (idx % 5) * 0.5, 0.4 + (idx % 4) * 0.5
 
-            lbl = res["predicted_behavior"]
-            if lbl == "Grazing":
-                cx, cy = -2.5 + (idx % 5) * 0.3, 1.8 + (idx % 4) * 0.25
-            elif lbl == "Walking":
-                cx, cy = 1.2 + (idx % 4) * 0.4, 3.1 + (idx % 5) * 0.3
-            elif lbl == "Resting":
-                cx, cy = -1.8 + (idx % 6) * 0.25, -2.4 + (idx % 4) * 0.3
-            elif lbl == "Standing":
-                cx, cy = 2.4 + (idx % 5) * 0.3, -1.2 + (idx % 4) * 0.25
-            elif lbl == "Lying":
-                cx, cy = -3.2 + (idx % 4) * 0.3, -1.1 + (idx % 5) * 0.2
-            else:
-                cx, cy = 0.2 + (idx % 5) * 0.5, 0.4 + (idx % 4) * 0.5
-
-            cluster_points.append({
-                "id": h.id,
-                "x": round(cx, 2),
-                "y": round(cy, 2),
-                "behavior": lbl,
-                "confidence": res["confidence"],
-                "is_anomaly": res["is_anomaly"],
-                "device_id": h.device_id
-            })
+        cluster_points.append({
+            "id": h.id,
+            "x": round(cx, 2),
+            "y": round(cy, 2),
+            "behavior": lbl,
+            "confidence": confidence,
+            "is_anomaly": is_anomaly,
+            "device_id": h.device_id
+        })
 
     return {
         "cluster_points": cluster_points,
@@ -497,16 +504,19 @@ def get_health_risk_decision_matrix(db: Session = Depends(get_db)):
     matrix = []
 
     for dev in devices:
-        headers = db.query(DataLoggerHeader).options(joinedload(DataLoggerHeader.points)).filter(DataLoggerHeader.device_id == str(dev)).order_by(DataLoggerHeader.timestamp.desc()).limit(15).all()
+        headers = db.query(DataLoggerHeader).filter(DataLoggerHeader.device_id == str(dev)).order_by(DataLoggerHeader.timestamp.desc()).limit(15).all()
         preds = []
         for h in headers:
-            if h.points and len(h.points) > 0:
-                sorted_pts = sorted(h.points, key=lambda p: p.point_index)
-                x_seq = [p.x or 0 for p in sorted_pts]
-                y_seq = [p.y or 0 for p in sorted_pts]
-                z_seq = [p.z or 0 for p in sorted_pts]
-                p_res = model.predict_single(x_seq, y_seq, z_seq)
-                preds.append(p_res)
+            if getattr(h, 'predicted_behavior', None):
+                p_res = {
+                    "predicted_behavior": h.predicted_behavior,
+                    "confidence": h.confidence,
+                    "anomaly_score": h.anomaly_score,
+                    "is_anomaly": h.is_anomaly
+                }
+            else:
+                p_res = {"predicted_behavior": "Unknown", "anomaly_score": 0.0}
+            preds.append(p_res)
 
         health = infer_secondary_health_status(preds, dev)
         avg_anom = round(sum([p.get("anomaly_score", 0.0) for p in preds]) / max(1, len(preds)), 2)

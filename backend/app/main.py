@@ -7,6 +7,23 @@ from app.services.ml_service import get_or_create_model
 
 from app.database import seed_demo_db_if_empty
 
+import asyncio
+from app.database import get_db, SessionLocal
+from app.services.ml_service import process_unpredicted_headers
+
+async def ml_prediction_worker():
+    """Background loop to process ML predictions independently of API requests."""
+    while True:
+        try:
+            db = SessionLocal()
+            processed = process_unpredicted_headers(db)
+            db.close()
+            # If no data was processed, sleep longer to avoid DB spam
+            await asyncio.sleep(5 if processed > 0 else 10)
+        except Exception as e:
+            print(f"[ML Worker Error] {e}")
+            await asyncio.sleep(10)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup actions: Seed DB tables & load baseline ML model
@@ -20,8 +37,13 @@ async def lifespan(app: FastAPI):
         get_or_create_model()
     except Exception as e:
         print(f"[Warning] ML Initialization Notice: {e}")
+        
+    # Start background prediction worker
+    worker_task = asyncio.create_task(ml_prediction_worker())
+    
     yield
     print("[Cow Health AI Backend] Shutting down server.")
+    worker_task.cancel()
 
 app = FastAPI(
     title="Cow Health Monitoring System ML API",

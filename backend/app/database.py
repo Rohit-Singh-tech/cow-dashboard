@@ -57,12 +57,14 @@ def seed_demo_db_if_empty():
     db = SessionLocal()
     try:
         # Clear existing synthetic placeholder headers if present
-        db.query(DataLoggerPoint).delete()
-        db.query(DataLoggerHeader).delete()
-        db.commit()
+       # Check if we already have data
+        existing_count = db.query(DataLoggerHeader).count()
+        if existing_count > 0:
+            print(f"[DB Seed] Found {existing_count} existing headers. Skipping seed.")
+            return
 
-        print("[DB Seed] Seeding realistic telemetry data for Device IDs: 11, 42, 89, 93, 248...")
-        devices = ["11", "42", "89", "93", "248"]
+        print("[DB Seed] Seeding realistic telemetry data for Device IDs: 11, 13, 17, 19...")
+        devices = ["11", "13", "17", "19"]
         
         for dev in devices:
             existing_tag = db.query(TagRegistry).filter(TagRegistry.device_id == dev).first()
